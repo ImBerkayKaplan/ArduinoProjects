@@ -1,30 +1,34 @@
-#include <SPI.h>
 #include <RH_RF95.h>
-#include <Wire.h>
-#include <SparkFunBME280.h>
-#include <SparkFunCCS811.h>
+#include "SparkFunBME280.h"
 #include "SparkFun_I2C_GPS_Arduino_Library.h"
-#include <TinyGPS++.h> //From: https://github.com/mikalhart/TinyGPSPlus
+#include <TinyGPS++.h>
+#include <string>
+#include "ICM_20948.h"
+#include <cmath>
 
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 3
-#define CCS811_ADDR 0x5B //Default I2C Address
+#define CCS811_ADDR 0x5B
+#define WIRE_PORT Wire
+#define AD0_VAL   1
 
-// Change to 915.0 or other frequency, must match RX's freq!
+// Must be 915.0 and match RX's freq!
 #define RF95_FREQ 915.0
  
 // Singleton instance of the radio driver
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
-CCS811 myCCS811(CCS811_ADDR);
-BME280 myBME280;
-I2CGPS myI2CGPS; //Hook object to the library
+BME280 myBME280; //Object to interface with the Sparkfun Environmental
+I2CGPS myI2CGPS; //Object to interface with the Sparkfun GPS
 TinyGPSPlus gps; //Declare gps object
+ICM_20948_I2C myICM;  // Object to interface with the Sparkfun IMU
+
+using namespace std;
 
 void setup() {
   
-  // manual reset
+  // Run a manual reset
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
   delay(100);
@@ -33,76 +37,121 @@ void setup() {
   digitalWrite(RFM95_RST, HIGH);
   delay(10);
 
-  rf95.init();
-
   // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
+  rf95.init();
   rf95.setFrequency(RF95_FREQ);
   rf95.setTxPower(23, false);
-  
-  Serial.begin(115200);
-  Serial.println("Start Comm");
-  Wire.begin(); //Inialize I2C Hardware
-  myI2CGPS.begin();
-  
-  //This begins the CCS811 sensor and prints error status of .beginWithStatus()
-  CCS811Core::CCS811_Status_e returnCode = myCCS811.beginWithStatus();
-  Serial.print("CCS811 begin exited with: ");
-  Serial.println(myCCS811.statusString(returnCode));
-  initialize_BME280();
 
+  // Start the serial communication
+  Serial.begin(115200);
+
+  // Start the GPS sensor
+  if (myI2CGPS.begin() == false) Serial.println("Module failed to respond. Please check wiring.");
   
+  // Start the IMU sensor
+  WIRE_PORT.begin();
+  WIRE_PORT.setClock(400000);
+  myICM.begin( WIRE_PORT, AD0_VAL );
+  if( myICM.status != ICM_20948_Stat_Ok ) Serial.println( "Could not connect to the IMU sensor for 3D movement." );
+
+  // Start the Environmental Sensor
+  if (myBME280.beginI2C() == false) Serial.println("Could not connect to the environmental sensor for temperature.");
 }
  
 void loop(){
-  //Check to see if data is ready with .dataAvailable()
-  if (myCCS811.dataAvailable()){
-    myCCS811.readAlgorithmResults();
-    float BMEtempC = myBME280.readTempC();
-    while (myI2CGPS.available()){
-      gps.encode(myI2CGPS.read()); //Feed the GPS parser
-    }
-    if (gps.time.isUpdated()){ //Check to see if new GPS info is available
-      displayInfo();
-    }
-    uint8_t *data = (uint8_t*)(&BMEtempC);
-    rf95.send(data, sizeof(data));
-    rf95.waitPacketSent();
-  }
+  string message = "CD5857F750553158342E3120FF172906";
+  
+  // Temperature Portion
+  float BMEtempC = myBME280.readTempF();
+  string BMEtempCstring= to_string(BMEtempC);
+  message = message + ',' + BMEtempCstring.substr(0,BMEtempCstring.length() - 4);
+  
   delay(10); //Don't spam the I2C bus
-}
 
-//Initialize BME280
-void initialize_BME280(){
+  // Obtain IMU information
+  if( myICM.dataReady() ){
+    myICM.getAGMT();                // The values are only updated when you call 'getAGMT'
+    printScaledAGMT(&myICM);   // This function takes into account the scale settings from when the measurement was made to calculate the values with units
+    delay(30);
+  }
+  
+  // Obtain GPS information
+  while (myI2CGPS.available()){
+    gps.encode(myI2CGPS.read()); //Feed the GPS parser
+  }
+  if (gps.time.isUpdated()){
+    message = message + ',' + GPSInfo();
     
-  //For I2C, enable the following and disable the SPI section
-  myBME280.settings.commInterface = I2C_MODE;
-  myBME280.settings.I2CAddress = 0x77;
-  myBME280.settings.runMode = 3; //Normal mode
-  myBME280.settings.tStandby = 0;
-  myBME280.settings.filter = 4;
-  myBME280.settings.tempOverSample = 5;
-  myBME280.settings.pressOverSample = 5;
-  myBME280.settings.humidOverSample = 5;
+  }
 
-  //Calling .begin() causes the settings to be loaded
-  delay(10); //Make sure sensor had enough time to turn on. BME280 requires 2ms to start up.
-  myBME280.begin();
+  // Print the message and send it to the receive Adafruit Feather through LoRa
+  Serial.println(message.c_str());
+  rf95.send((uint8_t*) message.c_str(), 50);
+  rf95.waitPacketSent();
+  Serial.println();
+  
+  delay(100);
 }
+
 
 //Display new GPS info
-void displayInfo(){
-  //We have new GPS data to deal with!
-  Serial.println();
-
+string GPSInfo(){
+  string result = "";
   if (gps.location.isValid()){
-    Serial.print("Location: ");
-    Serial.print(gps.location.lat(), 6);
-    Serial.print(F(", "));
-    Serial.print(gps.location.lng(), 6);
-    Serial.println();
+    result = to_string(gps.location.lat()) + " " + to_string(gps.location.lng());
   }
-  else
-  {
-    Serial.println(F("Location not yet valid"));
+  return result;
+}
+
+void printScaledAGMT(ICM_20948_I2C *sensor){
+  Serial.print("Scaled. Acc (mg) [");
+  printFormattedFloat(sensor->accX()/9800, 5, 2);
+  Serial.print(" ");
+  printFormattedFloat(sensor->accY()/9800, 5, 2);
+  Serial.print(" ");
+  printFormattedFloat(sensor->accZ()/9800, 5, 2);
+  Serial.print("], Gyr (DPS) [");
+  printFormattedFloat(sensor->gyrX(), 5, 2);
+  Serial.print(" ");
+  printFormattedFloat(sensor->gyrY(), 5, 2);
+  Serial.print(" ");
+  printFormattedFloat(sensor->gyrZ(), 5, 2);
+  Serial.print("], Mag (uT) [");
+  printFormattedFloat(sensor->magX(), 5, 2);
+  Serial.print(" ");
+  printFormattedFloat(sensor->magY(), 5, 2);
+  Serial.print(" ");
+  printFormattedFloat(sensor->magZ(), 5, 2);
+  Serial.print("], Tmp (C) [");
+  printFormattedFloat(sensor->temp(), 5, 2);
+  Serial.println("]");
+  Serial.println((sqrt(pow(sensor->accX()/9800, 2) + pow(sensor->accY()/98000, 2) + pow(sensor->accZ()/98000, 2))/2)*pow(1,2));
+}
+
+void printFormattedFloat(float val, uint8_t leading, uint8_t decimals){
+  float aval = abs(val);
+  if (val < 0){
+    Serial.print("-");
+  }
+  else{
+    Serial.print(" ");
+  }
+  for (uint8_t indi = 0; indi < leading; indi++){
+    uint32_t tenpow = 0;
+    if (indi < (leading - 1)){
+      tenpow = 1;
+    }
+    for (uint8_t c = 0; c < (leading - 1 - indi); c++){
+      tenpow *= 10;
+    }
+    if (aval >= tenpow){
+      break;
+    }
+  }
+  if (val < 0){
+    Serial.print(-val, decimals);
+  }
+  else{
+    Serial.print(val, decimals);
   }
 }

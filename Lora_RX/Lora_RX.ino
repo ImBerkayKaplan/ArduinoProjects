@@ -1,4 +1,5 @@
 #include <RH_RF95.h>
+#include <string.h>
 
 #define RFM95_CS 8
 #define RFM95_RST 4
@@ -18,18 +19,14 @@ void setup()
   rf95.setTxPower(23, false);
 }
  
-void loop()
-{
-        if (rf95.available()){
-        // Should be a message for us now
-        uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-        uint8_t len = sizeof(buf);
- 
-        if (rf95.recv(buf, &len)){
-          float temperature;
-          unsigned char b[] = {buf[0], buf[1], buf[2], buf[3]};
-          memcpy(&temperature, &b, sizeof(temperature));
-          Serial.println((int) temperature);
-        }
-      }
+void loop(){
+  if (rf95.available()){
+    // Should be a message for us now
+    uint8_t message[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(message);
+    
+    if (rf95.recv(message, &len)){
+      Serial.println((char *) message);
+    }
+  }
 }
