@@ -5,6 +5,7 @@
 #include <string>
 #include "ICM_20948.h"
 #include <cmath>
+#include <time.h>
 
 #define RFM95_CS 8
 #define RFM95_RST 4
@@ -59,22 +60,23 @@ void setup() {
 }
  
 void loop(){
-  string message = "CD5857F750553158342E3120FF172906";
+  string message = "";//"AEBBF51B50553158342E3120FF152D10";
   
   // Temperature Portion
   float BMEtempC = myBME280.readTempF();
   string BMEtempCstring= to_string(BMEtempC);
   message = message + ',' + BMEtempCstring.substr(0,BMEtempCstring.length() - 4);
-  
+
   delay(10); //Don't spam the I2C bus
 
   // Obtain IMU information
   if( myICM.dataReady() ){
     myICM.getAGMT();                // The values are only updated when you call 'getAGMT'
-    printScaledAGMT(&myICM);   // This function takes into account the scale settings from when the measurement was made to calculate the values with units
-    delay(30);
+    message = message + printScaledAGMT(&myICM);   // This function takes into account the scale settings from when the measurement was made to calculate the values with units
   }
-  
+
+  delay(10); //Don't spam the I2C bus
+
   // Obtain GPS information
   while (myI2CGPS.available()){
     gps.encode(myI2CGPS.read()); //Feed the GPS parser
@@ -83,14 +85,11 @@ void loop(){
     message = message + ',' + GPSInfo();
     
   }
-
+  
   // Print the message and send it to the receive Adafruit Feather through LoRa
   Serial.println(message.c_str());
-  rf95.send((uint8_t*) message.c_str(), 50);
+  rf95.send((uint8_t*) message.c_str(), RH_RF95_MAX_MESSAGE_LEN);
   rf95.waitPacketSent();
-  Serial.println();
-  
-  delay(100);
 }
 
 
@@ -103,55 +102,6 @@ string GPSInfo(){
   return result;
 }
 
-void printScaledAGMT(ICM_20948_I2C *sensor){
-  Serial.print("Scaled. Acc (mg) [");
-  printFormattedFloat(sensor->accX()/9800, 5, 2);
-  Serial.print(" ");
-  printFormattedFloat(sensor->accY()/9800, 5, 2);
-  Serial.print(" ");
-  printFormattedFloat(sensor->accZ()/9800, 5, 2);
-  Serial.print("], Gyr (DPS) [");
-  printFormattedFloat(sensor->gyrX(), 5, 2);
-  Serial.print(" ");
-  printFormattedFloat(sensor->gyrY(), 5, 2);
-  Serial.print(" ");
-  printFormattedFloat(sensor->gyrZ(), 5, 2);
-  Serial.print("], Mag (uT) [");
-  printFormattedFloat(sensor->magX(), 5, 2);
-  Serial.print(" ");
-  printFormattedFloat(sensor->magY(), 5, 2);
-  Serial.print(" ");
-  printFormattedFloat(sensor->magZ(), 5, 2);
-  Serial.print("], Tmp (C) [");
-  printFormattedFloat(sensor->temp(), 5, 2);
-  Serial.println("]");
-  Serial.println((sqrt(pow(sensor->accX()/9800, 2) + pow(sensor->accY()/98000, 2) + pow(sensor->accZ()/98000, 2))/2)*pow(1,2));
-}
-
-void printFormattedFloat(float val, uint8_t leading, uint8_t decimals){
-  float aval = abs(val);
-  if (val < 0){
-    Serial.print("-");
-  }
-  else{
-    Serial.print(" ");
-  }
-  for (uint8_t indi = 0; indi < leading; indi++){
-    uint32_t tenpow = 0;
-    if (indi < (leading - 1)){
-      tenpow = 1;
-    }
-    for (uint8_t c = 0; c < (leading - 1 - indi); c++){
-      tenpow *= 10;
-    }
-    if (aval >= tenpow){
-      break;
-    }
-  }
-  if (val < 0){
-    Serial.print(-val, decimals);
-  }
-  else{
-    Serial.print(val, decimals);
-  }
+string printScaledAGMT(ICM_20948_I2C *sensor){
+  return to_string(sensor->accX()/9800) + " " + to_string(sensor->accY()/9800) + " " + to_string(sensor->accZ()/9800) + " " + to_string(sensor->gyrX()) + " " + to_string(sensor->gyrY()) + " " + to_string(sensor->gyrZ()) + " " + to_string(sensor->magX()) + " " + to_string(sensor->magY()) + " " + to_string(sensor->magZ());
 }
