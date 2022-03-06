@@ -4,13 +4,10 @@
 #include <SparkFun_u-blox_GNSS_Arduino_Library.h>
 #include <lp55231.h>
 
+// Must be 915.0 and match RX's freq!
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 3
-#define WIRE_PORT Wire
-#define AD0_VAL   1
-
-// Must be 915.0 and match RX's freq!
 #define RF95_FREQ 915.0
  
 // Instances of the sensors and LoRa
@@ -40,9 +37,8 @@ void setup() {
   Serial.begin(115200);
   
   // Start the I2C protocol
-  WIRE_PORT.begin();
-  WIRE_PORT.setClock(400000);
-  myICM.begin( WIRE_PORT, AD0_VAL );
+  Wire.begin();
+  Wire.setClock(400000);
 
   // Start the GNSS sensor ()
   if (myGNSS.begin() == false) Serial.println(F("u-blox GNSS not detected at default I2C address. Please check wiring. Freezing."));
@@ -51,7 +47,7 @@ void setup() {
 }
  
 void loop(){
-  string message = "01,01";
+  string message = "02,01";
   
   double latitude = myGNSS.getLatitude()/10000000.;
   double longitude = myGNSS.getLongitude()/10000000.;
