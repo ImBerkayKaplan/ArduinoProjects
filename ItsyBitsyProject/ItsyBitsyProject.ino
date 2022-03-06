@@ -5,8 +5,8 @@ int buzz_pin = 13;
 int led_pin = 3;
 uint8_t beaconUuid[16] = 
 { 
+  0xFF, 0xFF, 0xFF, 0xFF, 0xDD, 0xFF, 0xFF, 0xFF, 
   0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
-  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xDD, 0xFF, 
 };
 
 // A valid Beacon packet consists of the following information:
@@ -71,15 +71,15 @@ void setup() {
 
 void scan_callback(ble_gap_evt_adv_report_t* report){
   int count_match = 0;
-  for (int i = 0; i < 31; i++){
-    //Serial.print(report->data.p_data[i], HEX);
-    //Serial.print("-");
-    if (report->data.p_data[i] == beaconUuid[count_match] && i > 8 && i < 25){
+  for (int i = 25; i < 31; i++){
+    Serial.print(report->data.p_data[i], HEX);
+    Serial.print("-");
+    if (report->data.p_data[i] == beaconUuid[i - 25]){
         count_match++;
       }
   }
-  //Serial.println();
-  if (count_match == 16){
+  Serial.println();
+  if (count_match == 6){
     digitalWrite(led_pin, HIGH);
     beep();
     digitalWrite(led_pin, LOW);
